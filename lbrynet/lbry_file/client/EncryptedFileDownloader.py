@@ -5,6 +5,7 @@ from zope.interface import implements
 from lbrynet.core.StreamDescriptor import save_sd_info
 from lbrynet.cryptstream.client.CryptStreamDownloader import CryptStreamDownloader
 from lbrynet.core.client.StreamProgressManager import FullStreamProgressManager
+from lbrynet.core.Error import FileOpenError
 from lbrynet.interfaces import IStreamDownloaderFactory
 from lbrynet.lbry_file.client.EncryptedFileMetadataHandler import EncryptedFileMetadataHandler
 import os
@@ -156,7 +157,7 @@ class EncryptedFileSaver(EncryptedFileDownloader):
                     self.file_written_to = file_written_to
                 except IOError:
                     log.error(traceback.format_exc())
-                    raise ValueError(
+                    raise FileOpenError(
                         "Failed to open %s. Make sure you have permission to save files to that"
                         " location." % file_written_to
                     )
