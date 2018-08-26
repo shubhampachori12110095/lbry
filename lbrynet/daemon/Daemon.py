@@ -239,14 +239,14 @@ class Daemon(AuthJSONRPCServer):
         self.streams = {}
 
     @property
-    def wallet(self):
+    def default_wallet(self):
         try:
             return self.wallet_manager.default_wallet
         except AttributeError:
             return None
 
     @property
-    def account(self):
+    def default_account(self):
         try:
             return self.wallet_manager.default_account
         except AttributeError:
@@ -1111,8 +1111,8 @@ class Daemon(AuthJSONRPCServer):
         """
         broadcast = not no_broadcast
         return self.jsonrpc_account_fund(
-            self.wallet_manager.default_account.name,
-            self.wallet_manager.default_account.name,
+            self.default_account.name,
+            self.default_account.name,
             amount=amount,
             outputs=num_addresses,
             broadcast=broadcast
@@ -1180,7 +1180,7 @@ class Daemon(AuthJSONRPCServer):
         """
         if address is not None:
             raise NotImplementedError("Limiting by address needs to be re-implemented in new wallet.")
-        dewies = yield self.wallet_manager.default_account.get_balance(
+        dewies = yield self.default_account.get_balance(
             0 if include_unconfirmed else 6
         )
         defer.returnValue(round(dewies / COIN, 3))
@@ -1211,7 +1211,7 @@ class Daemon(AuthJSONRPCServer):
         self.error_if_account_exists(account_name)
         account = LBCAccount.from_dict(
             self.wallet_manager.get_or_create_ledger('lbc_mainnet'),
-            self.wallet_manager, {
+            self.default_wallet, {
                 'name': account_name,
                 'seed': seed,
                 'private_key': private_key,
@@ -1221,12 +1221,12 @@ class Daemon(AuthJSONRPCServer):
                 }
             }
         )
-        self.wallet_manager.save()
+        self.default_wallet.save()
 
         result = account.to_dict()
         result['status'] = 'added'
         result.pop('certificates', None)
-        result['is_default'] = self.wallet_manager.accounts[0] == account
+        result['is_default'] = self.default_wallet.accounts[0] == account
         return result
 
     @requires("wallet")
@@ -1249,16 +1249,16 @@ class Daemon(AuthJSONRPCServer):
         self.error_if_account_exists(account_name)
         account = LBCAccount.generate(
             self.wallet_manager.get_or_create_ledger('lbc_mainnet'),
-            self.wallet_manager, account_name, {
+            self.default_wallet, account_name, {
                 'name': SingleKey.name if single_key else HierarchicalDeterministic.name
             }
         )
-        self.wallet_manager.save()
+        self.default_wallet.save()
 
         result = account.to_dict()
         result['status'] = 'created'
         result.pop('certificates', None)
-        result['is_default'] = self.wallet_manager.accounts[0] == account
+        result['is_default'] = self.default_wallet.accounts[0] == account
         return result
 
     @requires("wallet")
@@ -1276,10 +1276,9 @@ class Daemon(AuthJSONRPCServer):
             (map) removed account details
 
         """
-        wallet = self.wallet_manager.default_wallet
         account = self.get_account_or_error('account_name', account_name)
-        wallet.accounts.remove(account)
-        wallet.save()
+        self.default_wallet.accounts.remove(account)
+        self.default_wallet.save()
         result = account.to_dict()
         result['status'] = 'removed'
         result.pop('certificates', None)
@@ -1327,16 +1326,16 @@ class Daemon(AuthJSONRPCServer):
                         change_made = True
 
         if default:
-            self.wallet_manager.accounts.remove(account)
-            self.wallet_manager.accounts.insert(0, account)
+            self.default_wallet.accounts.remove(account)
+            self.default_wallet.accounts.insert(0, account)
             change_made = True
 
         if change_made:
-            self.wallet_manager.save()
+            self.default_wallet.save()
 
         result = account.to_dict()
         result.pop('certificates', None)
-        result['is_default'] = self.wallet_manager.accounts[0] == account
+        result['is_default'] = self.default_wallet.accounts[0] == account
         return result
 
     @requires(WALLET_COMPONENT)
@@ -2032,7 +2031,7 @@ class Daemon(AuthJSONRPCServer):
         if amount <= 0:
             raise Exception("Invalid amount")
         tx = yield self.wallet_manager.claim_new_channel(channel_name, amount)
-        self.wallet_manager.save()
+        self.default_wallet.save()
         self.analytics_manager.send_new_channel()
         nout = 0
         txo = tx.outputs[nout]
@@ -2204,7 +2203,7 @@ class Daemon(AuthJSONRPCServer):
                 # raises an error if the address is invalid
                 decode_address(address)
 
-        available = yield self.wallet_manager.default_account.get_balance()
+        available = yield self.default_account.get_balance()
         if bid >= available:
             # TODO: add check for existing claim balance
             #balance = yield self.wallet.get_max_usable_balance_for_claim(name)
@@ -2256,7 +2255,7 @@ class Daemon(AuthJSONRPCServer):
                     log.warning("Stripping empty fee from published metadata")
                     del metadata['fee']
                 elif 'address' not in metadata['fee']:
-                    address = yield self.wallet_manager.default_account.receiving.get_or_create_usable_address()
+                    address = yield self.default_account.receiving.get_or_create_usable_address()
                     metadata['fee']['address'] = address
             if 'fee' in metadata and 'version' not in metadata['fee']:
                 metadata['fee']['version'] = '_0_0_1'
@@ -2310,7 +2309,7 @@ class Daemon(AuthJSONRPCServer):
 
         certificate = None
         if channel_name:
-            certificates = yield self.wallet_manager.get_certificates(channel_name)
+            certificates = yield self.default_wallet.get_certificates(channel_name)
             for cert in certificates:
                 if cert.claim_id == channel_id:
                     certificate = cert
@@ -3292,9 +3291,8 @@ class Daemon(AuthJSONRPCServer):
                                    response['head_blob_availability'].get('is_available')
         defer.returnValue(response)
 
-
     def get_account_or_error(self, argument: str, account_name: str, lbc_only=True):
-        for account in self.wallet_manager.default_wallet.accounts:
+        for account in self.default_wallet.accounts:
             if account.name == account_name:
                 if lbc_only and not isinstance(account, LBCAccount):
                     raise ValueError(
@@ -3306,7 +3304,7 @@ class Daemon(AuthJSONRPCServer):
         raise ValueError("Couldn't find an account named: '{}'.".format(account_name))
 
     def error_if_account_exists(self, account_name: str):
-        for account in self.wallet_manager.default_wallet.accounts:
+        for account in self.default_wallet.accounts:
             if account.name == account_name:
                 raise ValueError("Account with name '{}' already exists.".format(account_name))
 
